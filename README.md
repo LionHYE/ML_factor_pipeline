@@ -84,9 +84,15 @@ python3 make_universe.py --sector sectors/l1.txt --min-turnover 1e6
 python3 run_pipeline.py --expr "reverse(rank(ts_sum(returns, 5)))" --symbols-file symbols_l1.txt
 python3 run_pipeline.py --expr "rank(ts_std_dev(returns, 20))" --symbols-file symbols_l1.txt
 
-# 4) 正式挖礦（同一份資料快取）
-python3 miner.py
+# 4) 正式挖礦：只用 IS 段挖掘，top-20 逐支跑完整 G1–G12
+#    驗證階段使用 --no-refresh 固定同一份資料快取
+python3 miner.py --symbols-file symbols_l1.txt --no-refresh
+
+# 只產出 top-20、不逐支驗證
+python3 miner.py --symbols-file symbols_l1.txt --no-refresh --no-verify
 ```
+
+真實資料挖掘會將 top 候選保存到 `runs/miner_*.json`，並把每支候選的完整驗證報告與 registry 記錄到 `runs/`。
 
 判讀原則：冒煙測試的重點是流程跑通，不是找 Alpha；經典因子大多 REJECT 是正常現象。
 若 G1 失敗，先查幣種上市時間是否太短（歷史不足 750 bar 會被警告）。
