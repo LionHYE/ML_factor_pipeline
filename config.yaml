@@ -1,0 +1,43 @@
+# ============================================================
+# 全部門檻在跑第一個候選因子之前鎖死。
+# 之後任何修改 = 流水線重置，registry 的 M 歸零重計。
+# ============================================================
+horizon: 1          # 預測視窗（bar 數）
+lag: 1              # 執行延遲：t 收盤出訊號 -> t+1 收盤進場
+min_names: 10       # 每個橫截面最少有效幣種數
+is_fraction: 0.7    # in-sample 比例（時間切分）
+embargo_bars: 10    # IS/OOS 之間的 embargo
+periods_per_year: 365
+cost_bps_per_side: 12.5   # 單邊成本（fee + spread + slippage 粗估）
+
+gates:
+  g1_min_coverage: 0.90
+  g3_max_nodes: 12
+  g3_max_depth: 4
+  g4_min_abs_t: 3.0        # 海量嘗試下不用 2
+  g5_n_placebo: 200        # 隨機因子零假設分布
+  g5_percentile: 99
+  g6_horizons: [1, 3, 7]
+  g6_min_factor_autocorr: 0.7
+  g7_min_retained: 0.5     # 中性化後 IC 至少保留 50%
+  g7_min_abs_t: 2.0
+  g8_min_after_cost_sharpe: 1.0
+  g9_window_scales: [0.7, 1.3]
+  g9_min_pert_abs_t: 1.5
+  g9_min_regime_agree: 3   # 4 個 regime 至少 3 個同號
+  g10_min_oos_t: 2.0
+  g10_min_oos_retention: 0.5
+  g11_block: 10
+  g11_n_boot: 1000
+
+miner:
+  population: 1000
+  generations: 15
+  tournament: 20
+  p_crossover: 0.7
+  p_subtree: 0.1
+  p_hoist: 0.1        # 抗 bloat
+  p_point: 0.05
+  parsimony: 0.005    # fitness 每節點扣分
+  max_depth: 4        # 硬上限
+  max_nodes: 12       # 硬上限

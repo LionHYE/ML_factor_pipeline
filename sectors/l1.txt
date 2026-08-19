@@ -1,0 +1,36 @@
+# Layer-1 公鏈板塊（基礎幣名，一行一個；# 開頭為註解）
+# 自行增刪後跑 make_universe.py 驗證
+BTC
+ETH
+SOL
+BNB
+ADA
+AVAX
+DOT
+NEAR
+APT
+SUI
+TON
+TRX
+ATOM
+SEI
+ICP
+ALGO
+EGLD
+HBAR
+INJ
+KAS
+TIA
+STX
+XTZ
+FLOW
+MINA
+ROSE
+CELO
+KAVA
+ONE
+LTC
+BCH
+ETC
+XRP
+DOGE
