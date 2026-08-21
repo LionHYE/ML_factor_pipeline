@@ -35,7 +35,8 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
-    cfg = yaml.safe_load(open(args.config))
+    with open(args.config, encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
 
     if args.synthetic:
         from synthetic import make_synthetic

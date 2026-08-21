@@ -228,8 +228,10 @@ def _run_real(args):
         ]
         result = subprocess.run(cmd)
         if result.returncode:
-            print(f"[miner] verification process failed with exit code "
-                  f"{result.returncode}")
+            raise SystemExit(
+                f"[miner] verification process failed with exit code "
+                f"{result.returncode}"
+            )
 
 
 def _run_synthetic_demo():
