@@ -1,23 +1,33 @@
 """Overnight batch mining: repeat miner.py runs with different seeds on a frozen cache.
 
 Workflow:
-  1. First run refreshes the local data cache once.
+  1. The first run refreshes the local data cache once (serial, alone).
   2. Every later run uses --no-refresh, so all runs see the exact same data.
-  3. Each run mines top-k IS candidates and verifies them through run_pipeline.py
+  3. With --n-jobs N, up to N miner runs execute in parallel after the warm-up.
+  4. Each run mines top-k IS candidates and verifies them through run_pipeline.py
      (G1-G12); every candidate is appended to runs/registry.jsonl by G12.
-  4. Next morning: python harvest.py
+  5. Next morning: python harvest.py
 
 Usage:
   python mine_batch.py --symbols-file symbols_l1.txt --hours 8
+  python mine_batch.py --symbols-file symbols_l1.txt --hours 8 --n-jobs 3
   python mine_batch.py --symbols-file symbols_l1.txt --runs 5 --top-k 10
 
-Stops before starting a new run once the time budget is used up (a run in
-progress is never killed). Seeds are seed0, seed0+1, ... so every run explores
-a different region and everything stays reproducible.
+Notes on --n-jobs:
+  - Each job is a full miner.py process (GP search + per-candidate verification),
+    so keep n_jobs <= physical cores / 2; verification is numpy-heavy.
+  - Parallel jobs append to runs/registry.jsonl concurrently. Line-level appends
+    are small and practically atomic, but keep n_jobs modest (<= 4) to be safe.
+  - Job starts are staggered by 2 seconds so runs/miner_<timestamp>.json names
+    cannot collide.
+
+Progress lines (machine-readable, for the LionAlgo platform status parser):
+  [batch] progress runs_done=<n> active=<k> elapsed_h=<x.xx> budget_h=<y.y>
 """
 import argparse
 import subprocess
 import sys
+import threading
 import time
 
 
@@ -33,18 +43,45 @@ def main():
     ap.add_argument("--top-k", type=int, default=10,
                     help="top-k per run to verify (default 10; verification is the slow part)")
     ap.add_argument("--seed0", type=int, default=100, help="first seed (default 100)")
+    ap.add_argument("--n-jobs", type=int, default=1,
+                    help="parallel miner runs after the warm-up run (default 1; keep <= 4)")
     args = ap.parse_args()
 
-    deadline = time.time() + args.hours * 3600
-    run_i = 0
-    while True:
-        if args.runs and run_i >= args.runs:
-            print(f"[batch] reached max runs ({args.runs}); stopping")
-            break
-        if time.time() >= deadline:
-            print("[batch] time budget exhausted; stopping")
-            break
-        seed = args.seed0 + run_i
+    if args.n_jobs < 1:
+        raise SystemExit("--n-jobs must be >= 1")
+
+    t_start = time.time()
+    deadline = t_start + args.hours * 3600
+    lock = threading.Lock()
+    state = {"next": 0, "done": 0, "active": 0, "stop": False}
+
+    def progress():
+        elapsed = (time.time() - t_start) / 3600
+        print(f"[batch] progress runs_done={state['done']} active={state['active']} "
+              f"elapsed_h={elapsed:.2f} budget_h={args.hours:.1f}", flush=True)
+
+    def claim_seed():
+        """Reserve the next seed, or None if budget/limit reached."""
+        with lock:
+            if state["stop"] or time.time() >= deadline:
+                return None
+            if args.runs and state["next"] >= args.runs:
+                return None
+            seed = args.seed0 + state["next"]
+            state["next"] += 1
+            state["active"] += 1
+            return seed
+
+    def release(ok):
+        with lock:
+            state["active"] -= 1
+            if ok:
+                state["done"] += 1
+            else:
+                state["stop"] = True
+        progress()
+
+    def run_once(seed, refresh):
         cmd = [sys.executable, "-u", "miner.py",
                "--symbols-file", args.symbols_file,
                "--timeframe", args.timeframe,
@@ -52,21 +89,45 @@ def main():
                "--config", args.config,
                "--top-k", str(args.top_k),
                "--seed", str(seed)]
-        if run_i > 0:
-            cmd.append("--no-refresh")  # freeze the cache after the first run
-        remaining = (deadline - time.time()) / 3600
-        print(f"\n[batch] ===== run {run_i + 1} seed={seed} "
-              f"(budget left {remaining:.1f}h) =====", flush=True)
+        if not refresh:
+            cmd.append("--no-refresh")
+        print(f"[batch] ===== run seed={seed} start "
+              f"(budget left {(deadline - time.time()) / 3600:.1f}h) =====", flush=True)
         t0 = time.time()
         r = subprocess.run(cmd)
-        print(f"[batch] run {run_i + 1} finished in {(time.time() - t0) / 60:.0f} min "
+        print(f"[batch] run seed={seed} finished in {(time.time() - t0) / 60:.0f} min "
               f"exit={r.returncode}", flush=True)
-        if r.returncode:
-            print("[batch] run failed; stopping to avoid burning the night on errors")
-            break
-        run_i += 1
+        return r.returncode == 0
 
-    print(f"[batch] done: {run_i} completed runs. Next: python harvest.py")
+    # --- Phase 1: warm-up run, serial, refreshes the cache once ---
+    seed = claim_seed()
+    if seed is None:
+        raise SystemExit("[batch] nothing to do (budget or run limit is zero)")
+    print("[batch] warm-up run: refreshing data cache once...", flush=True)
+    ok = run_once(seed, refresh=True)
+    release(ok)
+    if not ok:
+        raise SystemExit("[batch] warm-up run failed; aborting before burning the night on errors")
+
+    # --- Phase 2: parallel workers on the frozen cache ---
+    def worker(index):
+        time.sleep(index * 2)  # stagger: avoid miner_<timestamp>.json collisions
+        while True:
+            s = claim_seed()
+            if s is None:
+                return
+            release(run_once(s, refresh=False))
+
+    threads = [threading.Thread(target=worker, args=(i,), daemon=True)
+               for i in range(args.n_jobs)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    if state["stop"]:
+        print("[batch] stopped early because a run failed", flush=True)
+    print(f"[batch] done: {state['done']} completed runs. Next: python harvest.py", flush=True)
 
 
 if __name__ == "__main__":
