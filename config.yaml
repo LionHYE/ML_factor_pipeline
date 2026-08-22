@@ -1,6 +1,8 @@
 # ============================================================
 # 全部門檻在跑第一個候選因子之前鎖死。
-# 之後任何修改 = 流水線重置，registry 的 M 歸零重計。
+# 任何修改（參數或 gate_order）都會改變 config_hash；
+# harvest.py 會按 hash 分組統計——不同 hash 是不同實驗，
+# M 不合併、通過率不互比、PASS 清單不混用。
 # ============================================================
 horizon: 1          # 預測視窗（bar 數）
 lag: 1              # 執行延遲：t 收盤出訊號 -> t+1 收盤進場
@@ -29,6 +31,26 @@ gates:
   g10_min_oos_retention: 0.5
   g11_block: 10
   g11_n_boot: 1000
+
+# ---- 執行順序 ----
+# 可重排，但有硬性依賴（gates.py 會驗證，違反直接報錯）：
+#   G1_data 必須最前；G2_lookahead 必須在 G4_is_ic 之前；
+#   G4_is_ic 必須在 G5-G11 之前；G12（登記）永遠最後，不在此列表。
+gate_order:
+  - G1_data
+  - G2_lookahead
+  - G3_complexity
+  - G4_is_ic
+  - G5_placebo
+  - G6_decay_tradability
+  - G7_neutralization
+  - G8_after_cost
+  - G9_robustness
+  - G10_oos
+  - G11_bootstrap
+
+short_circuit: false  # true = 第一關失敗後跳過剩餘關（省算力；漏斗歸因變成「死於第一個失敗關」）
+note: ""              # 放鬆任何門檻時必填理由；會寫進該場次每一筆 registry 紀錄
 
 miner:
   population: 1000

@@ -38,6 +38,10 @@ def main():
     with open(args.config, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
+    # Validate gate order up front; a bad config must fail before any work.
+    gate_order = gates.resolve_gate_order(cfg)
+    cfg_hash = registry.config_fingerprint(cfg, gate_order)
+
     if args.synthetic:
         from synthetic import make_synthetic
         fields = make_synthetic(effect=args.synthetic_effect, seed=args.seed)
@@ -62,11 +66,14 @@ def main():
 
     print("=" * 76)
     print(f"expr    : {tree.to_str()}")
+    print(f"config  : {args.config}   hash={cfg_hash}   short_circuit={bool(cfg.get('short_circuit', False))}")
     print(f"dataset : {dataset}   elapsed: {elapsed:.1f}s   direction: {report['direction']:+.0f}")
     print("-" * 76)
     for r in report["results"]:
         mark = "PASS" if r["passed"] else "FAIL"
         print(f"[{mark}] {r['gate']:<22} {json.dumps(r['detail'], default=str)[:130]}")
+    for name in report.get("skipped", []):
+        print(f"[SKIP] {name:<22} short-circuited after first failure")
     print("-" * 76)
     print(f"VERDICT : {'PASS -- eligible for the correlation stage' if report['verdict'] else 'REJECT'}")
 
@@ -78,8 +85,14 @@ def main():
         "dataset": dataset,
         "verdict": report["verdict"],
         "direction": report["direction"],
+        "config_hash": cfg_hash,
         "gates": {r["gate"]: r["passed"] for r in report["results"]},
     }
+    if report.get("skipped"):
+        record["skipped"] = report["skipped"]
+    note = str(cfg.get("note") or "").strip()
+    if note:
+        record["config_note"] = note
     registry.append(reg_path, record)
     print(f"registry: M = {registry.count(reg_path)} candidates tested so far ({reg_path})")
 
